@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Send, Calendar, Trash2, FlaskConical } from "lucide-react";
+import { Send, Calendar, Trash2, FlaskConical, FileUp } from "lucide-react";
 import {
   createNewsletterAction,
   updateNewsletterAction,
@@ -60,11 +60,42 @@ export function NewsletterForm({
   const [testEmail, setTestEmail] = useState("");
   const [testSent, setTestSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pdfInputKey, setPdfInputKey] = useState(0);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
   const [pending, start] = useTransition();
   const confirmAction = useConfirmAction();
 
   const toggleSegment = (id: string) =>
     setSelectedSegments((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const uploadPdf = async (file: File) => {
+    setError(null);
+    if (file.type !== "application/pdf") {
+      setError("Please choose a PDF file.");
+      return;
+    }
+    setUploadingPdf(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/media/presign", { method: "POST", body: form });
+      const result = await response.json().catch(() => null) as { url?: string; error?: string } | null;
+      if (!response.ok || !result?.url) throw new Error(result?.error ?? "PDF upload failed");
+      const safeName = file.name.replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character] ?? character);
+      setContentHtml((previous) => `${previous}<p><a href="${result.url}" target="_blank" rel="noopener noreferrer">${safeName}</a></p>`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "PDF upload failed");
+    } finally {
+      setUploadingPdf(false);
+      setPdfInputKey((key) => key + 1);
+    }
+  };
 
   const save = () => {
     setError(null);
@@ -169,7 +200,30 @@ export function NewsletterForm({
           {readOnly ? (
             <p className="text-sm text-[var(--color-muted-fg)]">This newsletter has already been sent.</p>
           ) : (
-            <RichTextEditor html={contentHtml} onChange={setContentHtml} />
+            <>
+              <RichTextEditor html={contentHtml} onChange={setContentHtml} />
+              <div className="flex items-center gap-3">
+                <input
+                  key={pdfInputKey}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="sr-only"
+                  id="newsletter-pdf-upload"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void uploadPdf(file);
+                  }}
+                />
+                <label
+                  htmlFor="newsletter-pdf-upload"
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-2 text-sm font-medium hover:bg-[var(--color-muted)] ${uploadingPdf ? "pointer-events-none opacity-60" : ""}`}
+                >
+                  <FileUp className="h-4 w-4" />
+                  {uploadingPdf ? "Uploading PDF..." : "Attach PDF"}
+                </label>
+                <span className="text-xs text-[var(--color-muted-fg)]">Up to 25 MB; added as a link.</span>
+              </div>
+            </>
           )}
         </section>
       </div>
